@@ -1,0 +1,213 @@
+<script>
+// ナップサックの最大容量
+var KNAPSACK_WEIGHT_CAPACITY = 300;
+// アイテム一覧、[重量, 価値]
+var ITEMS = [
+  [6, 71],
+  [4, 29],
+  [78, 44],
+  [63, 73],
+  [23, 42],
+  [60, 72],
+  [14, 60],
+  [19, 79],
+  [16, 6],
+  [9, 72],
+  [8, 32],
+  [74, 23],
+  [42, 23],
+  [2, 92],
+  [85, 36]
+];
+
+// 遺伝的アルゴリズムによる探索
+var geneticAlgorithm = {
+  // 初期設定を行い、探索処理を開始させる
+  init: function () {
+    this.oneGenerationItemCount = 20; // 1世代での個体数
+    this.simulateGenerationNum = 30;  // 何世代まで繰り返すかを定義
+    this.mutantRate = 5; // 突然変異を何%の確率で起こすか
+    this.newParameters = new Array(this.oneGenerationItemCount);
+    this.currentMaxValueGene = '';
+    this.currentMaxValue = -99999999;
+    this.currentGenerationNumber = 1;
+    this.geneItemCount = ITEMS.length; // 候補アイテムの数
+    this.genesAtGeneration = new Array(this.oneGenerationItemCount);
+    for(var i = 0; i < this.oneGenerationItemCount; i++) {
+      this.genesAtGeneration[i] = this.createRandomPutsItemGene();
+    }
+    // 探索開始
+    var _this = this;
+    setTimeout(function(){ _this.simulateAtOneGeneration(); }, 0);
+  },
+  // 探索処理
+  simulateAtOneGeneration: function () {
+    var _this = this;
+    // 1世代分の個体達すべてでナップサックに実際にアイテムを入れるシミュレーションを行う
+    var genesArray = _this.genesAtGeneration;
+    var resultsArray = new Array(_this.oneGenerationItemCount);
+    for(var itemNo = 0; itemNo < _this.oneGenerationItemCount; itemNo++) {
+      // ナップサックに入れるアイテム価値の総和を求める
+      resultsArray[itemNo] = _this.calculateKnapsackValue(genesArray[itemNo]);
+      // 最高の結果が出た場合には記録
+      if(resultsArray[itemNo] !== false && _this.currentMaxValue < resultsArray[itemNo]) {
+        _this.currentMaxValueGene = genesArray[itemNo];
+        _this.currentMaxValue = resultsArray[itemNo];
+      }
+    }
+    // 現在の最大価値をログに出力する
+    console.log("current generaion:" + _this.currentGenerationNumber + " current max value gene:" + _this.currentMaxValueGene + " current max value:" + _this.currentMaxValue);
+    // 指定世代数に達するまで探索を繰り返す
+    if(_this.currentGenerationNumber < _this.simulateGenerationNum) {
+      // シミュレートの結果、最も優れた2体(エリート)を選抜
+      var elitesArray = _this.getElites(genesArray, resultsArray);
+      // 次の世代シミュレートに不足している個体数分、ルーレット選択と交叉で生み出す
+      var childrensArray = _this.createChildren(genesArray, resultsArray);
+      // 次の世代に用いる個体を用意(エリート以外は一定確率で突然変異させる)
+      _this.genesAtGeneration = _this.createNewGenerations(elitesArray, childrensArray);
+      _this.currentGenerationNumber++;
+      setTimeout(function(){ _this.simulateAtOneGeneration(); }, 0);
+    }
+  },
+  // ナップサックの容量範囲内でナップサックに入れるアイテム一覧をランダムに選択する
+  createRandomPutsItemGene: function() {
+    var _this = this;
+    var puts_item_gene = '';
+    var enable_puts_into_knapsack = false;
+    while(!enable_puts_into_knapsack) {
+      puts_item_gene = '';
+      for( var i = 0; i < _this.geneItemCount; i++) {
+        puts_item_gene += String(Math.floor(Math.random()*2));
+      }
+      enable_puts_into_knapsack = _this.calculateKnapsackValue(puts_item_gene) !== false;
+    }
+    return puts_item_gene; // ex) '001101111101100'
+  }, 
+  // 次の世代の個体を用意する
+  createNewGenerations: function(elitesArray, childrensArray) {
+    var _this = this;
+    // 子孫個体に一定確率(5%)で突然変異を起こさせる
+    var newGenerations = new Array(_this.oneGenerationItemCount);
+    for(var i = 0; i < _this.oneGenerationItemCount; i++) {
+      newGenerations[i] = childrensArray[i];
+    }
+    for(var j = 0; j < _this.oneGenerationItemCount; j++) {
+      var mutantrate = Number(Math.floor(Math.random()*100));
+      if(mutantrate < _this.mutantRate) {
+        var geneNo = Number(Math.floor(Math.random()*_this.geneItemCount));
+        var mutantGenChar = String((Number(newGenerations[j].charAt(geneNo))+1)%2);
+        newGenerations[j] = newGenerations[j].substr(0,geneNo) + mutantGenChar + newGenerations[j].substring((geneNo+1),_this.geneItemCount);
+      }
+    }
+    // エリート個体
+    newGenerations[0] = elitesArray[0];
+    newGenerations[1] = elitesArray[1];
+    return newGenerations;
+  },   
+  // 交叉で引数分の子供をつくる
+  createChildren: function(genesArray, resultsArray) {
+    var _this = this;
+    var children = new Array(_this.oneGenerationItemCount);
+    // ルーレット選択で、次の世代候補を選択
+    var minimumValue = 0;
+    for(var i = 0; i < _this.oneGenerationItemCount; i++){
+      minimumValue = (minimumValue > resultsArray[i]) ? resultsArray[i] : minimumValue;
+    }
+    minimumValue = Math.abs(minimumValue);
+    var total = 0;
+    for(var i = 0; i < _this.oneGenerationItemCount; i++){
+      total += (resultsArray[i]+minimumValue);
+    }
+    for(var x = 0; x < _this.oneGenerationItemCount; x++){
+      var arrow = Math.floor(Math.random()*total);
+      var sum = 0;
+      for(var i = 0; i < _this.oneGenerationItemCount; i++){
+        sum += (resultsArray[i]+minimumValue);
+        if(sum > arrow){
+          children[x] = genesArray[i];
+          break;
+        }
+      }
+    }
+    // 交叉(前から２組ずつ交叉する。交叉しなければそのままコピーされる)
+    for(var x = 0; (_this.oneGenerationItemCount % 2 === 1 && x < _this.oneGenerationItemCount - 1) || 
+            (_this.oneGenerationItemCount % 2 === 0 && x < _this.oneGenerationItemCount); x+=2){
+      // 交叉は一定確率で起こるものとする
+      if(Math.floor(Math.random()*100) < (100-_this.mutantRate)){
+        // ランダムに交叉点を決定
+        var randomCutStartNo = Number(Math.floor(Math.random()*_this.geneItemCount));
+        var randomCutEndNo = randomCutStartNo;
+        while(randomCutStartNo === randomCutEndNo) {
+          randomCutEndNo = Number(Math.floor(Math.random()*_this.geneItemCount));
+        }
+        if(randomCutStartNo > randomCutEndNo) {
+          var tmpNo = randomCutStartNo;
+          randomCutStartNo = randomCutEndNo;
+          randomCutEndNo = tmpNo;
+        }
+        // 交叉
+        var childrenEven = children[x].substring(0, randomCutStartNo)
+            + children[x+1].substring(randomCutStartNo, randomCutEndNo + 1)
+            + children[x].substring(randomCutEndNo + 1, _this.geneItemCount);
+        var childrenOdd = children[x+1].substring(0, randomCutStartNo)
+            + children[x].substring(randomCutStartNo, randomCutEndNo + 1)
+            + children[x+1].substring(randomCutEndNo + 1, _this.geneItemCount);
+        children[x] = childrenEven;
+        children[x+1] = childrenOdd;
+      }
+    }
+    return children;
+  },
+  // ナップサック積み込みシミュレート結果の中から最も優れた2体(エリート)を選抜する
+  getElites: function(genesArray, resultsArray) {
+    var _this = this;
+    var top2 = new Array(2); // 総価値の上位2組
+    var N_top2 = new Array(2); // 上位2個体となる個体番号
+    // まず初めの2組を確かめる
+    if(Number(resultsArray[0]) > Number(resultsArray[1])) {
+      top2[0] = resultsArray[0];
+      top2[1] = resultsArray[1];
+      N_top2[0] = 0;
+      N_top2[1] = 1;
+    } else {
+      top2[0] = resultsArray[1];
+      top2[1] = resultsArray[0];
+      N_top2[0] = 1;
+      N_top2[1] = 0;
+    }
+    // 3組目以降の価値を確かめていく
+    for(var i = 2; i < _this.oneGenerationItemCount; i++){
+      if(Number(resultsArray[i]) > Number(top2[0])) {
+        // 価値が1番高い場合
+        top2[1] = top2[0];
+        top2[0] = resultsArray[i];
+        N_top2[1] = N_top2[0];
+        N_top2[0] = i;
+      } else if(Number(resultsArray[i]) > Number(top2[1])) {
+        // 価値が2番目に高い場合
+        top2[1] = resultsArray[i];
+        N_top2[1] = i;
+      }
+    }
+    // エリート遺伝子(2つ)を戻り値で返す
+    return [genesArray[N_top2[0]], genesArray[N_top2[1]]];
+  },
+  // 引数のアイテムをナップサックに入れた場合の価値総和を求める、ナップサックの最大容量を超えた場合はfalse
+  calculateKnapsackValue: function(puts_item_gene) {
+    var total_weight = 0;
+    var total_value = 0;
+    items = puts_item_gene.split("");
+    for(var i = 0; i < items.length; i++) {
+      if(Number(items[i])) {
+        total_weight += ITEMS[i][0];
+        total_value += ITEMS[i][1];
+        if(total_weight > KNAPSACK_WEIGHT_CAPACITY) {
+          return false;
+        }
+      }
+    }
+    return total_value;
+  }
+};
+geneticAlgorithm.init();
+</script>

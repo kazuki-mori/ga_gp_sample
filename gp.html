@@ -1,0 +1,333 @@
+<script>
+// ナップサックの最大容量
+var KNAPSACK_WEIGHT_CAPACITY = 300;
+// アイテム一覧、[重量, 価値]
+var ITEMS = [
+  [6, 71],
+  [4, 29],
+  [78, 44],
+  [63, 73],
+  [23, 42],
+  [60, 72],
+  [14, 60],
+  [19, 79],
+  [16, 6],
+  [9, 72],
+  [8, 32],
+  [74, 23],
+  [42, 23],
+  [2, 92],
+  [85, 36]
+];
+
+// 木構造のノードの最大深度
+var MAX_TREE_NODE_DEPTH = 10;
+// 遺伝的プログラミングで遺伝子の表現に用いる木構造のノード
+var geneTreeNode = function(operator, item_no, num) {
+  this.id = genGeneTreeNodeId(); // ノードID
+  this.operator = operator; // 演算子
+  this.item_no = item_no; // 左辺ノード ： アイテムNo(ITEMS定数のインデックス) or 木構造
+  this.num = num; // 右辺ノード ： アイテムの積載数量 or 木構造
+  this.total_weight = 0; // 総重量
+  this.total_value = 0; // 総価値
+  // 総重量・総価値を計算する
+  this.calculateValueAndWeight = function() {
+    this.total_weight = new Function('return' + this.convertToEquationString('weight'))();
+    this.total_value = new Function('return' + this.convertToEquationString('value'))();
+  };
+  // 総価値を取得する、総重量がナップサックの最大容量を超える場合は-1を返す
+  this.getTotalValue = function() {
+    this.calculateValueAndWeight();
+    if(this.total_weight > KNAPSACK_WEIGHT_CAPACITY) {
+      return -1;
+    }
+    return this.total_value;
+  };
+  // 配下に存在するノードID一覧を取得する
+  this.getNodeIdList = function(){
+    nodeIds = [this.id];
+    if(isNaN(this.item_no)) {
+      nodeIds = nodeIds.concat(this.item_no.getNodeIdList());
+    }
+    if(isNaN(this.num)) {
+      nodeIds = nodeIds.concat(this.num.getNodeIdList());
+    }
+    return nodeIds;
+  },
+  // 配下に存在するノードをIDで取得する
+  this.getNodeById = function(node_id) {
+    if(this.id == node_id) {
+      return this;
+    }
+    if(isNaN(this.item_no)) {
+      get_node_result = this.item_no.getNodeById(node_id);
+      if(get_node_result !== false) {
+        return get_node_result;
+      }
+    }
+    if(isNaN(this.num)) {
+      get_node_result = this.num.getNodeById(node_id);
+      if(get_node_result !== false) {
+        return get_node_result;
+      }
+    }
+    return false;
+  },
+  // 配下に存在するノードをID指定で上書きする
+  this.setNodeById = function(node_id, node) {
+    if(this.id == node_id) {
+      this.operator = node.operator;
+      this.item_no = node.item_no;
+      this.num = node.num;
+    } else if(isNaN(this.item_no) && this.item_no.getNodeById(node_id) !== false) {
+      this.item_no.setNodeById(node_id, node);
+    } else if(isNaN(this.num) && this.num.getNodeById(node_id) !== false) {
+      this.num.setNodeById(node_id, node);
+    }
+  },
+  // 指定IDノードの木構造における深さを取得する
+  this.getDepthById = function(node_id, base_depth) {
+    if(this.id == node_id) {
+      return base_depth;
+    }
+    if(isNaN(this.item_no)) {
+      get_node_result = this.item_no.getDepthById(node_id, base_depth + 1);
+      if(get_node_result !== false) {
+        return get_node_result;
+      }
+    }
+    if(isNaN(this.num)) {
+      get_node_result = this.num.getDepthById(node_id, base_depth + 1);
+      if(get_node_result !== false) {
+        return get_node_result;
+      }
+    }
+    return false;
+  },
+  // このノードのコピーオブジェクトを生成する
+  this.copyObject = function() {
+    if(isNaN(this.item_no)) {
+      this.item_no = this.item_no.copyObject();
+    }
+    if(isNaN(this.num)) {
+      this.num = this.num.copyObject();
+    }
+    return new geneTreeNode(this.operator, this.item_no, this.num);
+  },
+  // このノードの構造を文字列形式で取得する
+  this.convertToEquationString = function(convert_type) {
+    var item_no_equation = '';
+    var num_equation = '';
+    if(isNaN(this.item_no)) {
+      item_no_equation = this.item_no.convertToEquationString(convert_type);
+    } else {
+      if(convert_type == 'value') {
+        item_no_equation = ITEMS[this.item_no][1];
+      } else if(convert_type == 'weight') {
+        item_no_equation = ITEMS[this.item_no][0];
+      } else {
+        item_no_equation = '[' + this.item_no + ']';
+      }
+    }
+    if(isNaN(this.num)) {
+      num_equation = this.num.convertToEquationString(convert_type);
+    } else {
+      num_equation = this.num;
+    }
+    return ' (' + item_no_equation + this.operator + num_equation + ') ';
+  }
+};
+// ノードIDの生成
+var genGeneTreeNodeId = function(){
+  var time_val = (new Date()).getTime().toString();
+  var rand_val = Math.floor(1000*Math.random()).toString();
+  return Number(time_val + rand_val);
+}
+
+// 遺伝的プログラミングによる探索
+var geneticProgramming = {
+  // 初期設定を行い、探索処理を開始させる
+  init: function () {
+    this.oneGenerationItemCount = 20; // 1世代での個体数
+    this.simulateGenerationNum = 30;  // 何世代まで繰り返すかを定義
+    this.mutantRate = 5; // 突然変異を何%の確率で起こすか
+    this.operateAdd = '+';
+    this.operateMulti = '*';
+    this.operatorList = [this.operateAdd, this.operateMulti]; // 演算子一覧
+    this.currentMaxValueGene = '';
+    this.currentMaxValue = -1;
+    this.currentGenerationNumber = 1;
+    this.maxTreeDepth = 10; // 木構造の最大深度
+    this.genesAtGeneration = new Array(this.oneGenerationItemCount);
+    for(var i = 0; i < this.oneGenerationItemCount; i++) {
+      this.genesAtGeneration[i] = this.createRandomPutsItemGene();
+    }
+    // 探索開始
+    var _this = this;
+    setTimeout(function(){ _this.simulateAtOneGeneration(); }, 0);
+  },
+  // 探索処理
+  simulateAtOneGeneration: function () {
+    var _this = this;
+    // 1世代分の個体達すべてでナップサックに実際にアイテムを入れるシミュレーションを行う
+    var genesArray = _this.genesAtGeneration;
+    var resultsArray = new Array(_this.oneGenerationItemCount);
+    for(var itemNo = 0; itemNo < _this.oneGenerationItemCount; itemNo++) {
+      // ナップサックに入れるアイテム価値の総和を求める
+      resultsArray[itemNo] = genesArray[itemNo].getTotalValue();
+      // 最高の結果が出た場合には記録
+      if(_this.currentMaxValue < resultsArray[itemNo]) {
+        _this.currentMaxValueGene = genesArray[itemNo];
+        _this.currentMaxValue = resultsArray[itemNo];
+      }
+    }
+    // 現在の最大価値をログに出力する
+    console.log("current generaion:" + _this.currentGenerationNumber + " current max value gene:" + _this.currentMaxValueGene.convertToEquationString() + " current max value:" + _this.currentMaxValue);
+    // 指定世代数に達するまで探索を繰り返す
+    if(_this.currentGenerationNumber < _this.simulateGenerationNum) {
+      // シミュレートの結果、最も優れた2体(エリート)を選抜
+      var elitesArray = _this.getElites(genesArray, resultsArray);
+      // 次の世代シミュレートに不足している個体数分、ルーレット選択と交叉で生み出す
+      var childrensArray = _this.createChildren(genesArray, resultsArray);
+      // 次の世代に用いる個体を用意(エリート以外は一定確率で突然変異させる)
+      _this.genesAtGeneration = _this.createNewGenerations(elitesArray, childrensArray);
+      _this.currentGenerationNumber++;
+      setTimeout(function(){ _this.simulateAtOneGeneration(); }, 0);
+    }
+  },
+  // ナップサックの容量範囲内でナップサックに入れるアイテム一覧をランダムに選択する
+  createRandomPutsItemGene: function() {
+    var _this = this;
+    var puts_item_gene_tree = '';
+    var enable_puts_into_knapsack = false;
+    while(!enable_puts_into_knapsack) {
+      operator = _this.operatorList[Math.floor(Math.random()*2)];
+      puts_item_gene_tree = _this.createRandomPutsItemGeneTreeNode(operator, 1);
+      enable_puts_into_knapsack = puts_item_gene_tree.getTotalValue() >= 0;
+    }
+    return puts_item_gene_tree;
+  },
+  createRandomPutsItemGeneTreeNode: function(operator, depth) {
+    var _this = this;
+    var item_no = null;
+    var num = null;
+    if(_this.maxTreeDepth <= depth || operator === _this.operateMulti) {
+      // 処理単純化のために、最大深度に達しているか演算子が掛け算の場合は「アイテム*個数」の木構造にする
+      item_no = Math.floor(Math.random()*ITEMS.length);
+      num = Math.ceil(Math.random()*MAX_TREE_NODE_DEPTH);
+      operator = _this.operateMulti;
+    } else {
+      // さらなる深度の木構造遺伝子を要素に設定する
+      item_no = _this.createRandomPutsItemGeneTreeNode(_this.operatorList[Math.floor(Math.random()*2)], depth +1);
+      num = _this.createRandomPutsItemGeneTreeNode(_this.operatorList[Math.floor(Math.random()*2)], depth +1);
+    }
+    return new geneTreeNode(operator, item_no, num);
+  },
+  // 次の世代の個体を用意する
+  createNewGenerations: function(elitesArray, childrensArray) {
+    var _this = this;
+    // 子孫個体に一定確率(5%)で突然変異を起こさせる
+    var newGenerations = new Array(_this.oneGenerationItemCount);
+    for(var i = 0; i < _this.oneGenerationItemCount; i++) {
+      newGenerations[i] = childrensArray[i];
+    }
+    for(var i = 0; i < _this.oneGenerationItemCount; i++) {
+      var mutantrate = Number(Math.floor(Math.random()*100));
+      if(mutantrate < _this.mutantRate) {
+        node_ids = newGenerations[i].getNodeIdList();
+        choice_node_id_index = Math.floor(Math.random()*node_ids.length);
+        change_node_id = node_ids[choice_node_id_index];
+        new_operator = _this.operatorList[Math.floor(Math.random()*2)];
+        node_depth = newGenerations[i].getDepthById(change_node_id, 1);
+        mutant_node = _this.createRandomPutsItemGeneTreeNode(new_operator, node_depth);
+        newGenerations[i].setNodeById(change_node_id, mutant_node);
+      }
+    }
+    // エリート個体
+    newGenerations[0] = elitesArray[0];
+    newGenerations[1] = elitesArray[1];
+    return newGenerations;
+  },   
+  // 交叉で引数分の子供をつくる
+  createChildren: function(genesArray, resultsArray) {
+    var _this = this;
+    var children = new Array(_this.oneGenerationItemCount);
+    // ルーレット選択で、次の世代候補を選択
+    var minimumValue = 0;
+    for(var i = 0; i < _this.oneGenerationItemCount; i++){
+      minimumValue = (minimumValue > resultsArray[i]) ? resultsArray[i] : minimumValue;
+    }
+    minimumValue = Math.abs(minimumValue);
+    var total = 0;
+    for(var i = 0; i < _this.oneGenerationItemCount; i++){
+      total += (resultsArray[i]+minimumValue);
+    }
+    for(var x = 0; x < _this.oneGenerationItemCount; x++){
+      var arrow = Math.floor(Math.random()*total);
+      var sum = 0;
+      for(var i = 0; i < _this.oneGenerationItemCount; i++){
+        sum += (resultsArray[i]+minimumValue);
+        if(sum > arrow){
+          children[x] = genesArray[i].copyObject();
+          break;
+        }
+      }
+    }
+    // 交叉(前から２組ずつ交叉する。交叉しなければそのままコピーされる)
+    for(var x = 0; (_this.oneGenerationItemCount % 2 === 1 && x < _this.oneGenerationItemCount - 1) || 
+            (_this.oneGenerationItemCount % 2 === 0 && x < _this.oneGenerationItemCount); x+=2){
+      // 交叉は一定確率で起こるものとする
+      if(Math.floor(Math.random()*100) < (100-_this.mutantRate)){
+        // ランダムに交叉点(ノード)を決定
+        node_ids = children[x].getNodeIdList();
+        choice_node_id_index = Math.floor(Math.random()*node_ids.length);
+        even_node_id = node_ids[choice_node_id_index];
+        even_node = children[x].getNodeById(even_node_id).copyObject();
+        node_ids = children[x+1].getNodeIdList();
+        choice_node_id_index = Math.floor(Math.random()*node_ids.length);
+        odd_node_id = node_ids[choice_node_id_index];
+        odd_node = children[x+1].getNodeById(odd_node_id).copyObject();
+        // 交叉
+        children[x].setNodeById(even_node_id, odd_node);
+        children[x+1].setNodeById(odd_node_id, even_node);
+      }
+    }
+    return children;
+  },
+  // ナップサック積み込みシミュレート結果の中から最も優れた2体(エリート)を選抜する
+  getElites: function(genesArray, resultsArray) {
+    var _this = this;
+    var top2 = new Array(2); // 総価値の上位2組
+    var N_top2 = new Array(2); // 上位2個体となる個体番号
+    // まず初めの2組を確かめる
+    if(Number(resultsArray[0]) > Number(resultsArray[1])) {
+      top2[0] = resultsArray[0];
+      top2[1] = resultsArray[1];
+      N_top2[0] = 0;
+      N_top2[1] = 1;
+    } else {
+      top2[0] = resultsArray[1];
+      top2[1] = resultsArray[0];
+      N_top2[0] = 1;
+      N_top2[1] = 0;
+    }
+    // 3組目以降の価値を確かめていく
+    for(var i = 2; i < _this.oneGenerationItemCount; i++){
+      if(Number(resultsArray[i]) > Number(top2[0])) {
+        // 価値が1番高い場合
+        top2[1] = top2[0];
+        top2[0] = resultsArray[i];
+        N_top2[1] = N_top2[0];
+        N_top2[0] = i;
+      } else if(Number(resultsArray[i]) > Number(top2[1])) {
+        // 価値が2番目に高い場合
+        top2[1] = resultsArray[i];
+        N_top2[1] = i;
+      }
+    }
+    // エリート遺伝子(2つ)を戻り値で返す
+    return [genesArray[N_top2[0]], genesArray[N_top2[1]]];
+  }
+};
+geneticProgramming.init();
+</script>
