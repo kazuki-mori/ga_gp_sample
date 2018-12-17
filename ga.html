@@ -73,11 +73,13 @@ var geneticAlgorithm = {
   createRandomPutsItemGene: function() {
     var _this = this;
     var puts_item_gene = '';
+    var random_gene = 0;
     var enable_puts_into_knapsack = false;
     while(!enable_puts_into_knapsack) {
       puts_item_gene = '';
       for( var i = 0; i < _this.geneItemCount; i++) {
-        puts_item_gene += String(Math.floor(Math.random()*2));
+        random_gene = Math.floor(Math.random()*2);
+        puts_item_gene += String(random_gene);
       }
       enable_puts_into_knapsack = _this.calculateKnapsackValue(puts_item_gene) !== false;
     }
